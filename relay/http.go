@@ -212,12 +212,18 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			resp, err := b.post(outBytes, query, authHeader)
 			if err != nil {
 				log.Printf("Problem posting to relay %q backend %q: %v", h.Name(), b.name, err)
-			} else {
+				return
+			}
+
+			if resp != nil {
+
 				if resp.StatusCode/100 == 5 {
 					log.Printf("5xx response for relay %q backend %q: %v", h.Name(), b.name, resp.StatusCode)
 				}
+
 				responses <- resp
 			}
+
 		}()
 	}
 
@@ -388,10 +394,23 @@ func newHTTPBackend(cfg *HTTPOutputConfig) (*httpBackend, error) {
 		p = newRetryBuffer(cfg.BufferSizeMB*MB, batch, max, p)
 	}
 
+	if cfg.DropResponses {
+		p = &dropper{poster: p}
+	}
+
 	return &httpBackend{
 		poster: p,
 		name:   cfg.Name,
 	}, nil
+}
+
+type dropper struct {
+	poster poster
+}
+
+func (d *dropper) post(data []byte, query, auth string) (*responseData, error) {
+	_, err := d.poster.post(data, query, auth)
+	return nil, err
 }
 
 var ErrBufferFull = errors.New("retry buffer full")

@@ -52,6 +52,9 @@ type HTTPOutputConfig struct {
 	// Skip TLS verification in order to use self signed certificate.
 	// WARNING: It's insecure. Use it only for developing and don't use in production.
 	SkipTLSVerification bool `toml:"skip-tls-verification"`
+
+	// Do not return anything to the original request from this backend
+	DropResponses bool `toml:"drop-responses"`
 }
 
 type UDPConfig struct {
