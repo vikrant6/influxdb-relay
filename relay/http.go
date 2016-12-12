@@ -141,30 +141,16 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Don't pass through non create queries
 	if reqPath == "/query" {
-		verb := strings.Split(queryParams["q"][0], " ")[0]
-		switch verb {
-		case "alter":
-			// Allow alter queries
-		case "create":
-			// Allow create queries
-		case "delete":
-			jsonError(w, http.StatusBadRequest, "this query is not supported by relay")
-			return
-		case "drop":
-			// Allow drop queries
-		case "grant":
-		case "kill":
-			jsonError(w, http.StatusBadRequest, "this query is not supported by relay")
-			return
-		case "show":
-			jsonError(w, http.StatusBadRequest, "this query is not supported by relay")
-			return
-		case "revoke":
-			// Allow revoke queries
-		case "select":
-			jsonError(w, http.StatusBadRequest, "this query is not supported by relay")
-			return
-		default:
+		// First check if there are multiple queries being passed
+		queries := strings.Split(queryParams["q"][0], ";")
+		if len(queries) > 1 {
+			// If there are drop any queries other than the first
+			queryParams["q"][0] = queries[0]
+		}
+		// Pull verb out of query
+		verb := strings.Split(queries[0], " ")[0]
+		// If the query is a create then let it pass, else return error
+		if verb != "create" {
 			jsonError(w, http.StatusBadRequest, "this query is not supported by relay")
 			return
 		}
@@ -355,7 +341,7 @@ func (b *simplePoster) post(buf []byte, query string, auth string, q bool) (*res
 	if q {
 		location, err := url.Parse(b.location)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		location.Path = "/query"
 		loc = location.String()
