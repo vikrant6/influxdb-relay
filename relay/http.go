@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -113,13 +114,15 @@ func (h *HTTP) Stop() error {
 func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
-	if r.URL.Path == "/ping" && (r.Method == "GET" || r.Method == "HEAD") {
-			w.Header().Add("X-InfluxDB-Version", "relay")
-			w.WriteHeader(http.StatusNoContent)
-			return
+	reqPath := r.URL.Path
+
+	if reqPath == "/ping" && (r.Method == "GET" || r.Method == "HEAD") {
+		w.Header().Add("X-InfluxDB-Version", "relay")
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 
-	if r.URL.Path != "/write" {
+	if reqPath != "/write" && reqPath != "/query" {
 		jsonError(w, http.StatusNotFound, "invalid write endpoint")
 		return
 	}
@@ -135,6 +138,37 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	queryParams := r.URL.Query()
+
+	// Don't pass through non create queries
+	if reqPath == "/query" {
+		verb := strings.Split(queryParams["q"][0], " ")[0]
+		switch verb {
+		case "alter":
+			// Allow alter queries
+		case "create":
+			// Allow create queries
+		case "delete":
+			jsonError(w, http.StatusBadRequest, "this query is not supported by relay")
+			return
+		case "drop":
+			// Allow drop queries
+		case "grant":
+		case "kill":
+			jsonError(w, http.StatusBadRequest, "this query is not supported by relay")
+			return
+		case "show":
+			jsonError(w, http.StatusBadRequest, "this query is not supported by relay")
+			return
+		case "revoke":
+			// Allow revoke queries
+		case "select":
+			jsonError(w, http.StatusBadRequest, "this query is not supported by relay")
+			return
+		default:
+			jsonError(w, http.StatusBadRequest, "this query is not supported by relay")
+			return
+		}
+	}
 
 	// fail early if we're missing the database
 	if queryParams.Get("db") == "" {
@@ -209,7 +243,11 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b := b
 		go func() {
 			defer wg.Done()
-			resp, err := b.post(outBytes, query, authHeader)
+			q := false
+			if reqPath == "/query" {
+				q = true
+			}
+			resp, err := b.post(outBytes, query, authHeader, q)
 			if err != nil {
 				log.Printf("Problem posting to relay %q backend %q: %v", h.Name(), b.name, err)
 			} else {
@@ -286,7 +324,7 @@ func jsonError(w http.ResponseWriter, code int, message string) {
 }
 
 type poster interface {
-	post([]byte, string, string) (*responseData, error)
+	post([]byte, string, string, bool) (*responseData, error)
 }
 
 type simplePoster struct {
@@ -312,8 +350,17 @@ func newSimplePoster(location string, timeout time.Duration, skipTLSVerification
 	}
 }
 
-func (b *simplePoster) post(buf []byte, query string, auth string) (*responseData, error) {
-	req, err := http.NewRequest("POST", b.location, bytes.NewReader(buf))
+func (b *simplePoster) post(buf []byte, query string, auth string, q bool) (*responseData, error) {
+	loc := b.location
+	if q {
+		location, err := url.Parse(b.location)
+		if err != nil {
+			panic(err)
+		}
+		location.Path = "/query"
+		loc = location.String()
+	}
+	req, err := http.NewRequest("POST", loc, bytes.NewReader(buf))
 	if err != nil {
 		return nil, err
 	}

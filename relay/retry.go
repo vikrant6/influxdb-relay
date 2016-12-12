@@ -47,9 +47,9 @@ func newRetryBuffer(size, batch int, max time.Duration, p poster) *retryBuffer {
 	return r
 }
 
-func (r *retryBuffer) post(buf []byte, query string, auth string) (*responseData, error) {
+func (r *retryBuffer) post(buf []byte, query string, auth string, q bool) (*responseData, error) {
 	if atomic.LoadInt32(&r.buffering) == 0 {
-		resp, err := r.p.post(buf, query, auth)
+		resp, err := r.p.post(buf, query, auth, false)
 		// TODO A 5xx caused by the point data could cause the relay to buffer forever
 		if err == nil && resp.StatusCode/100 != 5 {
 			return resp, err
@@ -79,7 +79,7 @@ func (r *retryBuffer) run() {
 
 		interval := r.initialInterval
 		for {
-			resp, err := r.p.post(buf.Bytes(), batch.query, batch.auth)
+			resp, err := r.p.post(buf.Bytes(), batch.query, batch.auth, false)
 			if err == nil && resp.StatusCode/100 != 5 {
 				batch.resp = resp
 				atomic.StoreInt32(&r.buffering, 0)
