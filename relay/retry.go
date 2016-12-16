@@ -47,9 +47,9 @@ func newRetryBuffer(size, batch int, max time.Duration, p poster) *retryBuffer {
 	return r
 }
 
-func (r *retryBuffer) post(buf []byte, query string, auth string, q bool) (*responseData, error) {
+func (r *retryBuffer) post(buf []byte, query string, auth string, isQuery bool) (*responseData, error) {
 	if atomic.LoadInt32(&r.buffering) == 0 {
-		resp, err := r.p.post(buf, query, auth, q)
+		resp, err := r.p.post(buf, query, auth, isQuery)
 		// TODO A 5xx caused by the point data could cause the relay to buffer forever
 		if err == nil && resp.StatusCode/100 != 5 {
 			return resp, err
@@ -58,7 +58,7 @@ func (r *retryBuffer) post(buf []byte, query string, auth string, q bool) (*resp
 	}
 
 	// already buffering or failed request
-	batch, err := r.list.add(buf, query, auth, q)
+	batch, err := r.list.add(buf, query, auth, isQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -114,13 +114,13 @@ type batch struct {
 	next *batch
 }
 
-func newBatch(buf []byte, query string, auth string, q bool) *batch {
+func newBatch(buf []byte, query string, auth string, isQuery bool) *batch {
 	b := new(batch)
 	b.bufs = [][]byte{buf}
 	b.size = len(buf)
 	b.query = query
 	b.auth = auth
-	b.q = q
+	b.q = isQuery
 	b.wg.Add(1)
 	return b
 }
@@ -158,7 +158,7 @@ func (l *bufferList) pop() *batch {
 	return b
 }
 
-func (l *bufferList) add(buf []byte, query string, auth string, q bool) (*batch, error) {
+func (l *bufferList) add(buf []byte, query string, auth string, isQuery bool) (*batch, error) {
 	l.cond.L.Lock()
 
 	if l.size+len(buf) > l.maxSize {
@@ -190,7 +190,7 @@ func (l *bufferList) add(buf []byte, query string, auth string, q bool) (*batch,
 
 	if *cur == nil {
 		// new tail element
-		*cur = newBatch(buf, query, auth, q)
+		*cur = newBatch(buf, query, auth, isQuery)
 	} else {
 		// append to current batch
 		b := *cur
