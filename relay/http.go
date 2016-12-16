@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/influxdata/influxdb/influxql"
 	"github.com/influxdata/influxdb/models"
 )
 
@@ -128,9 +129,9 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// We are using a flag to handle the create databases
-	q := false
+	isQuery := false
 	if reqPath == "/query" {
-		q = true
+		isQuery = true
 	}
 
 	if r.Method != "POST" {
@@ -146,24 +147,24 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	queryParams := r.URL.Query()
 
 	// Don't pass through non create queries
-	if reqPath == "/query" {
+	if isQuery {
 		// First check if there are multiple queries being passed
-		queries := strings.Split(queryParams["q"][0], ";")
-		if len(queries) > 1 {
-			// If there are drop any queries other than the first
-			queryParams["q"][0] = queries[0]
-		}
-		// Pull verb out of query
-		verb := strings.Split(queries[0], " ")[0]
-		// If the query is a create then let it pass, else return error
-		if verb != "create" {
-			jsonError(w, http.StatusBadRequest, "this query is not supported by relay")
+		qry, err := influxql.ParseQuery(queryParams["q"][0])
+		if err != nil {
+			jsonError(w, http.StatusBadRequest, "invalid query")
 			return
+		}
+		for _, stmt := range qry.Statements {
+			_, ok := stmt.(*influxql.CreateDatabaseStatement)
+			if !ok {
+				jsonError(w, http.StatusBadRequest, "query not supported, relay only supports CREATE DATABASE queries")
+				return
+			}
 		}
 	}
 
 	// fail early if we're missing the database
-	if !q && queryParams.Get("db") == "" {
+	if !isQuery && queryParams.Get("db") == "" {
 		jsonError(w, http.StatusBadRequest, "missing parameter: db")
 		return
 	}
@@ -235,7 +236,7 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b := b
 		go func() {
 			defer wg.Done()
-			resp, err := b.post(outBytes, query, authHeader, q)
+			resp, err := b.post(outBytes, query, authHeader, isQuery)
 			if err != nil {
 				log.Printf("Problem posting to relay %q backend %q: %v", h.Name(), b.name, err)
 			} else {
