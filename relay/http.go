@@ -127,6 +127,12 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// We are using a flag to handle the create databases
+	q := false
+	if reqPath == "/query" {
+		q = true
+	}
+
 	if r.Method != "POST" {
 		w.Header().Set("Allow", "POST")
 		if r.Method == "OPTIONS" {
@@ -157,7 +163,7 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// fail early if we're missing the database
-	if queryParams.Get("db") == "" {
+	if !q && queryParams.Get("db") == "" {
 		jsonError(w, http.StatusBadRequest, "missing parameter: db")
 		return
 	}
@@ -229,10 +235,6 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b := b
 		go func() {
 			defer wg.Done()
-			q := false
-			if reqPath == "/query" {
-				q = true
-			}
 			resp, err := b.post(outBytes, query, authHeader, q)
 			if err != nil {
 				log.Printf("Problem posting to relay %q backend %q: %v", h.Name(), b.name, err)
@@ -256,7 +258,7 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for resp := range responses {
 		switch resp.StatusCode / 100 {
 		case 2:
-			w.WriteHeader(http.StatusNoContent)
+			w.WriteHeader(resp.StatusCode)
 			return
 
 		case 4:
@@ -314,8 +316,9 @@ type poster interface {
 }
 
 type simplePoster struct {
-	client   *http.Client
-	location string
+	client *http.Client
+	write  string
+	query  string
 }
 
 func newSimplePoster(location string, timeout time.Duration, skipTLSVerification bool) *simplePoster {
@@ -327,24 +330,25 @@ func newSimplePoster(location string, timeout time.Duration, skipTLSVerification
 		},
 	}
 
+	// Ignore error because location is checked in the config
+	qryURL, _ := url.Parse(location)
+	qryURL.Path = "/query"
 	return &simplePoster{
 		client: &http.Client{
 			Timeout:   timeout,
 			Transport: transport,
 		},
-		location: location,
+		write: location,
+		query: qryURL.String(),
 	}
 }
 
 func (b *simplePoster) post(buf []byte, query string, auth string, q bool) (*responseData, error) {
-	loc := b.location
+	var loc string
 	if q {
-		location, err := url.Parse(b.location)
-		if err != nil {
-			return nil, err
-		}
-		location.Path = "/query"
-		loc = location.String()
+		loc = b.query
+	} else {
+		loc = b.write
 	}
 	req, err := http.NewRequest("POST", loc, bytes.NewReader(buf))
 	if err != nil {
