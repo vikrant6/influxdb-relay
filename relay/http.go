@@ -235,14 +235,10 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 
-		case 4:
+		default:
 			// user error
 			resp.Write(w)
 			return
-
-		default:
-			// hold on to one of the responses to return back to the client
-			errResponse = resp
 		}
 	}
 
